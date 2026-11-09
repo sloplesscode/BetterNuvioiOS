@@ -17,8 +17,9 @@ with zipfile.ZipFile(source) as archive:
     assert len(infos) == 1, infos
     info = plistlib.loads(archive.read(infos[0]))
     app = infos[0].rsplit('/', 1)[0]
-    for key in ('CFBundleIdentifier', 'CFBundleDisplayName', 'CFBundleExecutable', 'CFBundleShortVersionString', 'CFBundleVersion', 'MinimumOSVersion'):
+    for key in ('CFBundleIdentifier', 'CFBundleExecutable', 'CFBundleShortVersionString', 'CFBundleVersion', 'MinimumOSVersion'):
         assert info.get(key), key
+    assert info.get('CFBundleDisplayName') or info.get('CFBundleName'), 'Missing app name'
     executable = archive.read(f'{app}/{info["CFBundleExecutable"]}')
     assert len(executable) >= 32
     assert struct.unpack_from('<II', executable) == (0xfeedfacf, 0x100000c), 'Expected arm64 Mach-O'
@@ -32,7 +33,7 @@ with zipfile.ZipFile(source) as archive:
     assert any(n.startswith(app + '/') and n.endswith('subfont.ttf') for n in names), 'Missing subtitle font'
     version = info['CFBundleShortVersionString']
     assert version and all(c.isascii() and (c.isalnum() or c in '._-') for c in version)
-    print({key: info[key] for key in ('CFBundleIdentifier', 'CFBundleDisplayName', 'CFBundleShortVersionString', 'CFBundleVersion', 'MinimumOSVersion')})
+    print({key: info.get(key) for key in ('CFBundleIdentifier', 'CFBundleDisplayName', 'CFBundleName', 'CFBundleShortVersionString', 'CFBundleVersion', 'MinimumOSVersion')})
 outputs = [directory / 'BetterNuvio.ipa', directory / f'BetterNuvio-{version}.ipa']
 for output in outputs:
     shutil.copyfile(source, output)

@@ -5,6 +5,11 @@ on:
     branches: [enhanced]
   workflow_dispatch:
     inputs:
+      publish_release:
+        description: Publish the IPA to GitHub Releases
+        required: false
+        type: boolean
+        default: false
       configuration:
         description: Production-optimized or fast validation build
         required: true
@@ -111,6 +116,12 @@ jobs:
       - name: Prepare iOS dependencies
         run: ./scripts/prepare-ios-dependencies.sh
 
+      - name: Check caption policy
+        run: |
+          mkdir -p build/validation
+          swiftc iosApp/iosApp/Player/CaptionSelectionPolicy.swift iosApp/CaptionPolicyTests/main.swift -o build/validation/caption-policy-tests
+          build/validation/caption-policy-tests
+
       - name: Build unsigned full ${{ inputs.configuration }} IPA
         run: |
           (
@@ -160,6 +171,7 @@ jobs:
           git archive --format=zip --output=build/ios-ipa/BetterNuvio-source.zip HEAD
 
       - name: Publish iOS release
+        if: inputs.publish_release == true
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_COMMIT: ${{ github.sha }}

@@ -98,6 +98,10 @@ internal fun PlayerScreenRuntime.restorePersistedTrackPreferenceIfNeeded(): Bool
     }
 
     restorePersistedAudioPreference(preference)
+    if (playerController?.supportsDualSubtitles == true) {
+        trackPreferenceRestoreApplied = true
+        return true
+    }
 
     when (preference.subtitleType) {
         PersistedSubtitleSelectionType.DISABLED -> {
@@ -193,6 +197,7 @@ internal fun PlayerScreenRuntime.refreshTracks() {
 private fun PlayerScreenRuntime.tryAutoSelectPreferredSubtitleFromAvailableTracks(
     preferredAudioTargets: List<String>,
 ) {
+    if (playerController?.supportsDualSubtitles == true) return
     if (isUserExplicitSubtitleSelection) return
 
     val preferredSubtitleLanguage = normalizeLanguageCode(

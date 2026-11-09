@@ -6,6 +6,9 @@ import androidx.compose.ui.Modifier
 interface PlayerEngineController {
     val supportsDualSubtitles: Boolean get() = false
     fun showDualSubtitleSettings() {}
+    fun configureCaptionSelection(contentKey: String, dialogueEnabled: Boolean, rewindEnabled: Boolean) {}
+    fun previewCaptionsAfterRewind() {}
+    fun setTemporaryCaptionMute(active: Boolean) {}
     val playbackEngine: AndroidPlaybackEngine? get() = null
     val supportsNightMode: Boolean get() = true
     fun play()

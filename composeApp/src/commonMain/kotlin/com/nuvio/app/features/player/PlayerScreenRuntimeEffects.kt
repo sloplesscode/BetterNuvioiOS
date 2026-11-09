@@ -263,6 +263,16 @@ internal fun PlayerScreenRuntime.BindPlayerRuntimeEffects() {
         playerController?.setKeyboardShortcutsEnabled(platformKeyboardShortcutsEnabled)
     }
 
+    val captionContentKey = listOf(parentMetaType, parentMetaId, activeVideoId?.takeIf { it.isNotBlank() } ?: title, activeSeasonNumber?.toString().orEmpty(), activeEpisodeNumber?.toString().orEmpty())
+        .joinToString("") { "${it.length}:$it" }
+    LaunchedEffect(playerController, captionContentKey, playerSettingsUiState.preferredSubtitleLanguage, playerSettingsUiState.autoShowSubtitlesOnRewindEnabled) {
+        playerController?.configureCaptionSelection(
+            captionContentKey,
+            playerSettingsUiState.preferredSubtitleLanguage != SubtitleLanguageOption.NONE,
+            playerSettingsUiState.autoShowSubtitlesOnRewindEnabled,
+        )
+    }
+
     val subtitlePreferenceKey = listOf(
         playerSettingsUiState.preferredSubtitleLanguage,
         playerSettingsUiState.secondaryPreferredSubtitleLanguage.orEmpty(),

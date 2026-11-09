@@ -198,8 +198,13 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge {
     }
 
     func selectAudioTrack(trackId: Int32) { playerVC?.selectAudio(Int(trackId)) }
-    func selectSubtitleTrack(trackId: Int32) { playerVC?.selectSubtitle(Int(trackId)) }
+    func selectSubtitleTrack(trackId: Int32) { playerVC?.selectDialogueCaption(Int(trackId)) }
     func showDualSubtitleSettings() { playerVC?.showDualSubtitleSettings() }
+    func configureCaptionSelection(contentKey: String, dialogueEnabled: Bool, rewindEnabled: Bool) {
+        ensurePlayerViewController().configureCaptionSelection(content: contentKey, dialogueEnabled: dialogueEnabled, rewindEnabled: rewindEnabled)
+    }
+    func previewCaptionsAfterRewind() { playerVC?.previewCaptionsAfterRewind() }
+    func setTemporaryCaptionMute(active: Bool) { playerVC?.setTemporaryCaptionMute(active: active) }
     func setSubtitleUrl(url: String) { playerVC?.addSubtitleUrl(url) }
     func clearExternalSubtitle() { playerVC?.removeExternalSubtitles() }
     func clearExternalSubtitleAndSelect(trackId: Int32) { playerVC?.removeExternalSubtitlesAndSelect(Int(trackId)) }
@@ -291,6 +296,7 @@ struct TrackInfo {
     let title: String
     let lang: String
     let selected: Bool
+    var captionTrack: CaptionTrack? = nil
 }
 
 private struct PendingLoadRequest {
@@ -482,6 +488,17 @@ final class MPVPlayerViewController: UIViewController {
     private var dualSubtitleStyles = [DualSubtitleStyle(), DualSubtitleStyle()]
     private var dualSubtitleLabels = [UILabel(), UILabel()]
     private var secondarySubtitleTrackId = -1
+    private var captionContentKey = ""
+    private var dialogueCaptionsEnabled = false
+    private var captionRewindEnabled = true
+    private let captionChoiceStore = CaptionChoiceStore()
+    private var savedCaptionChoice: SavedCaptionChoice?
+    private var captionPreview = CaptionRewindPreview()
+    private var captionMuteOriginal: CaptionPair?
+    private var captionPreviewTimer: Timer?
+    private var pendingManualExternalCaption: (url: String, path: String)?
+    private var restoredCaptionURLs = Set<String>()
+    private var originalCaptionURLs: [Int: String] = [:]
     var isPlayerLoading: Bool = true
     var isPlayerPlaying: Bool = false
     var isPlayerEnded: Bool = false
@@ -1056,6 +1073,14 @@ final class MPVPlayerViewController: UIViewController {
 
     private func startLoad(_ request: PendingLoadRequest) {
         guard mpv != nil else { return }
+        captionPreviewTimer?.invalidate()
+        captionPreview.cancel()
+        captionMuteOriginal = nil
+        restoredCaptionURLs.removeAll()
+        originalCaptionURLs.removeAll()
+        pendingManualExternalCaption = nil
+        setStringProperty("sid", "no")
+        setStringProperty("secondary-sid", "no")
         layoutPlayerSurfaces()
         clearPlaybackError()
         let sanitizedHeaders = sanitizeRequestHeaders(request.requestHeaders)
@@ -1672,6 +1697,7 @@ final class MPVPlayerViewController: UIViewController {
     }
 
     func addSubtitleUrl(_ url: String) {
+        endCaptionPreview()
         guard mpv != nil, isFileLoaded else {
             // Upstream: an add-on subtitle picked before mpv has loaded the file is queued and
             // added on MPV_EVENT_FILE_LOADED.
@@ -1692,6 +1718,7 @@ final class MPVPlayerViewController: UIViewController {
             } else {
                 self.command("sub-add", args: [url, "select"])
             }
+            self.pendingManualExternalCaption = (url, localPath ?? url)
         }
     }
 
@@ -1739,10 +1766,9 @@ final class MPVPlayerViewController: UIViewController {
         onMpvQueue { [weak self] in
             guard let self, self.mpvGeneration == coreGeneration, self.mpv != nil else { return }
             self.removeExternalSubtitleTracksOnMpvQueue()
-            if trackId >= 0 {
-                self.selectSubtitle(trackId)
-            } else {
-                self.setStringProperty("sid", "no")
+            DispatchQueue.main.async {
+                guard self.mpvGeneration == coreGeneration else { return }
+                self.selectDialogueCaption(trackId)
             }
         }
     }
@@ -1833,6 +1859,10 @@ final class MPVPlayerViewController: UIViewController {
     }
 
     func destroyPlayer() {
+        captionPreviewTimer?.invalidate()
+        captionPreviewTimer = nil
+        captionPreview.cancel()
+        captionMuteOriginal = nil
         pictureInPictureController?.invalidate()
         pictureInPictureController = nil
         NotificationCenter.default.removeObserver(self)
@@ -2180,6 +2210,7 @@ final class MPVPlayerViewController: UIViewController {
         stateRefreshLock.unlock()
 
         let coreGeneration = mpvGeneration
+        let trackPlaybackGeneration = playbackStateGeneration
         mpvQueue.async { [weak self] in
             guard let self, self.mpvGeneration == coreGeneration else { return }
             let tracks = self.readTracks()
@@ -2190,8 +2221,10 @@ final class MPVPlayerViewController: UIViewController {
 
             guard let tracks else { return }
             DispatchQueue.main.async {
+                guard self.mpvGeneration == coreGeneration, self.playbackStateGeneration == trackPlaybackGeneration else { return }
                 self.audioTracks = tracks.audio
                 self.subtitleTracks = tracks.subtitles
+                self.applyCaptionSelection()
             }
         }
     }
@@ -2203,6 +2236,7 @@ final class MPVPlayerViewController: UIViewController {
         let count = getInt("track-list/count")
         var audioIdx = 0
         var subIdx = 0
+        var captionOrdinals: [String: Int] = [:]
 
         for i in 0..<count {
             let type = getString("track-list/\(i)/type") ?? ""
@@ -2229,7 +2263,13 @@ final class MPVPlayerViewController: UIViewController {
                 audio.append(TrackInfo(index: audioIdx, id: id, type: type, title: displayTitle, lang: lang, selected: selected))
                 audioIdx += 1
             } else if type == "sub" {
-                subs.append(TrackInfo(index: subIdx, id: id, type: type, title: displayTitle, lang: lang, selected: selected))
+                let signature = [title.lowercased(), lang.lowercased(), codec.lowercased()].joined(separator: "\u{1f}")
+                let ordinal = captionOrdinals[signature, default: 0]
+                captionOrdinals[signature] = ordinal + 1
+                let caption = CaptionTrack(id: id, title: title, language: lang, codec: codec,
+                    forced: getFlag("track-list/\(i)/forced"), ordinal: ordinal,
+                    externalURL: getTrackString(i, "external-filename").isEmpty ? nil : getTrackString(i, "external-filename"))
+                subs.append(TrackInfo(index: subIdx, id: id, type: type, title: displayTitle, lang: lang, selected: selected, captionTrack: caption))
                 subIdx += 1
             }
         }
@@ -2910,8 +2950,133 @@ private struct DualSubtitleSettingsView: View {
 }
 
 extension MPVPlayerViewController {
+    private var captionTracks: [CaptionTrack] { subtitleTracks.compactMap(\.captionTrack) }
+
+    func configureCaptionSelection(content: String, dialogueEnabled: Bool, rewindEnabled: Bool) {
+        if content != captionContentKey {
+            captionPreviewTimer?.invalidate()
+            captionPreview.cancel()
+            captionMuteOriginal = nil
+            captionContentKey = content
+            savedCaptionChoice = captionChoiceStore.load(content: content)
+            pendingManualExternalCaption = nil
+            restoredCaptionURLs.removeAll()
+            originalCaptionURLs.removeAll()
+        }
+        dialogueCaptionsEnabled = dialogueEnabled
+        captionRewindEnabled = rewindEnabled
+        if !rewindEnabled { endCaptionPreview() }
+        applyCaptionSelection()
+    }
+
+    private func currentCaptionPair() -> CaptionPair {
+        CaptionPair(dialogue: Int(getString("sid") ?? "") ?? -1,
+                    signs: Int(getString("secondary-sid") ?? "") ?? -1)
+    }
+
+    private func applyCaptionPair(_ pair: CaptionPair) {
+        let current = currentCaptionPair()
+        // Clear the secondary first so swapping the two slots is deterministic.
+        if current.signs != pair.signs || current.dialogue != pair.dialogue {
+            setStringProperty("secondary-sid", "no")
+            selectSubtitle(pair.dialogue)
+            setStringProperty("secondary-sub-ass-override", "no")
+            setStringProperty("secondary-sid", pair.signs < 0 ? "no" : String(pair.signs))
+        }
+        secondarySubtitleTrackId = pair.signs
+    }
+
+    private func rememberCaption(slot: Int, track: Int) {
+        guard !captionContentKey.isEmpty else { return }
+        let fingerprint: String
+        if track < 0 { fingerprint = "" }
+        else {
+            guard let caption = captionTracks.first(where: { $0.id == track }) else { return }
+            fingerprint = caption.fingerprint
+        }
+        var choice = savedCaptionChoice ?? SavedCaptionChoice()
+        let externalURL = originalCaptionURLs[track] ?? captionTracks.first(where: { $0.id == track })?.externalURL
+        if slot == 0 {
+            choice.dialogue = fingerprint
+            choice.dialogueExternalURL = externalURL
+        } else {
+            choice.signs = fingerprint
+            choice.signsExternalURL = externalURL
+        }
+        savedCaptionChoice = choice
+        captionChoiceStore.save(choice, content: captionContentKey)
+    }
+
+    private func applyCaptionSelection() {
+        guard isFileLoaded, !captionContentKey.isEmpty, captionPreview.original == nil, captionMuteOriginal == nil else { return }
+        if let pending = pendingManualExternalCaption {
+            let selected = currentCaptionPair().dialogue
+            guard captionTracks.contains(where: { $0.id == selected && $0.externalURL == pending.path }) else { return }
+            originalCaptionURLs[selected] = pending.url
+            rememberCaption(slot: 0, track: selected)
+            pendingManualExternalCaption = nil
+        }
+        // Reattach a manually chosen add-on subtitle on reopening this item. If its
+        // URL is no longer usable, retain the choice as Off instead of picking another translation.
+        for url in [savedCaptionChoice?.dialogueExternalURL, savedCaptionChoice?.signsExternalURL].compactMap({ $0 }) {
+            guard URL(string: url)?.scheme?.hasPrefix("http") == true else { continue }
+            if !captionTracks.contains(where: { $0.externalURL == url }), restoredCaptionURLs.insert(url).inserted {
+                command("sub-add", args: [url, "auto"], checkForErrors: false)
+            }
+        }
+        applyCaptionPair(CaptionSelectionPolicy.selection(tracks: captionTracks,
+            dialogueEnabled: dialogueCaptionsEnabled, saved: savedCaptionChoice))
+    }
+
+    private func endCaptionPreview() {
+        captionPreviewTimer?.invalidate()
+        captionPreviewTimer = nil
+        if let previous = captionMuteOriginal {
+            captionMuteOriginal = nil
+            applyCaptionPair(previous)
+        }
+        if let previous = captionPreview.finish(now: ProcessInfo.processInfo.systemUptime, force: true) {
+            applyCaptionPair(previous)
+        }
+    }
+
+    func selectDialogueCaption(_ track: Int) {
+        endCaptionPreview()
+        rememberCaption(slot: 0, track: track)
+        selectSubtitle(track)
+    }
+
+    func previewCaptionsAfterRewind() {
+        guard captionRewindEnabled, isFileLoaded else { return }
+        let available = CaptionSelectionPolicy.selection(tracks: captionTracks, dialogueEnabled: true, saved: nil)
+        guard let preview = captionPreview.begin(current: currentCaptionPair(), available: available,
+                now: ProcessInfo.processInfo.systemUptime) else { return }
+        applyCaptionPair(preview)
+        captionPreviewTimer?.invalidate()
+        captionPreviewTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: false) { [weak self] _ in
+            self?.endCaptionPreview()
+        }
+    }
+
+    func setTemporaryCaptionMute(active: Bool) {
+        guard isFileLoaded else { return }
+        if !active {
+            if captionMuteOriginal != nil { endCaptionPreview() }
+            return
+        }
+        guard captionMuteOriginal == nil else { return }
+        endCaptionPreview()
+        let available = CaptionSelectionPolicy.selection(tracks: captionTracks, dialogueEnabled: true, saved: nil)
+        let current = currentCaptionPair()
+        guard (current.dialogue < 0 && available.dialogue >= 0) || (current.signs < 0 && available.signs >= 0) else { return }
+        captionMuteOriginal = current
+        applyCaptionPair(CaptionPair(dialogue: current.dialogue >= 0 ? current.dialogue : available.dialogue,
+                                     signs: current.signs >= 0 ? current.signs : available.signs))
+    }
+
     func showDualSubtitleSettings() {
         guard mpv != nil else { return }
+        endCaptionPreview()
         refreshTracks()
         let settings = DualSubtitleSettingsView(
             tracks: subtitleTracks,
@@ -2919,7 +3084,9 @@ extension MPVPlayerViewController {
             styles: dualSubtitleStyles
         ) { [weak self] slot, track, style in
             guard let self else { return }
+            self.endCaptionPreview()
             self.dualSubtitleStyles[slot] = style
+            self.rememberCaption(slot: slot, track: track)
             if slot == 0 {
                 self.selectSubtitle(track)
                 self.lastSubtitleDelayMs = Int(style.delay * 1000)

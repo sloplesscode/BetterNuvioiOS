@@ -94,6 +94,11 @@ actual fun PlatformPlayerSurface(
         object : PlayerEngineController, PlayerSystemControlSource {
             override val supportsDualSubtitles = true
             override fun showDualSubtitleSettings() { bridge.showDualSubtitleSettings() }
+            override fun configureCaptionSelection(contentKey: String, dialogueEnabled: Boolean, rewindEnabled: Boolean) {
+                bridge.configureCaptionSelection(contentKey, dialogueEnabled, rewindEnabled)
+            }
+            override fun previewCaptionsAfterRewind() { bridge.previewCaptionsAfterRewind() }
+            override fun setTemporaryCaptionMute(active: Boolean) { bridge.setTemporaryCaptionMute(active) }
             private var lastAppliedVolume: Float? = null
             private var lastLoggedAudioTracks: String? = null
 

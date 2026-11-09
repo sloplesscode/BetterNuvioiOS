@@ -3099,4 +3099,8 @@
     <string name="settings_glass_ui_style_balanced">Balanced</string>
     <string name="settings_glass_ui_style_vivid">Vivid</string>
     <string name="player_subtitle_tracks">Subtitle tracks</string>
+    <string name="caption_dialogue_default">Dialogue captions on by default</string>
+    <string name="caption_english_defaults_description">Auto-select English dialogue when enabled. English signs are on by default when available. Each movie and episode remembers your overrides.</string>
+    <string name="caption_rewind_settings">Caption rewind</string>
+    <string name="caption_rewind_description">When either track is off, rewinding shows available English dialogue and signs for 10 seconds, then restores your choices. If both tracks are on, nothing changes.</string>
 </resources>

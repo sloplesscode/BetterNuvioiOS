@@ -37,6 +37,7 @@ internal fun PlaybackSubtitleSettings(
     isTablet: Boolean,
     settings: PlayerSettingsUiState,
 ) {
+    var showCaptionRewindDialog by remember { mutableStateOf(false) }
     var showPreferredSubtitleDialog by remember { mutableStateOf(false) }
     var showSecondarySubtitleDialog by remember { mutableStateOf(false) }
     var showLibassRenderScaleDialog by remember { mutableStateOf(false) }
@@ -47,26 +48,37 @@ internal fun PlaybackSubtitleSettings(
             isTablet = isTablet,
         ) {
             SettingsGroup(isTablet = isTablet) {
-                SettingsNavigationRow(
-                    title = stringResource(Res.string.settings_playback_preferred_subtitle_language),
-                    description = when (settings.preferredSubtitleLanguage) {
-                        SubtitleLanguageOption.NONE -> stringResource(Res.string.settings_playback_option_none)
-                        SubtitleLanguageOption.DEVICE -> stringResource(Res.string.settings_playback_option_device_language)
-                        SubtitleLanguageOption.FORCED -> stringResource(Res.string.settings_playback_option_forced)
-                        else -> languageLabelForCode(settings.preferredSubtitleLanguage)
-                    },
-                    enabled = !settings.externalPlayerEnabled || settings.externalPlayerForwardSubtitles,
-                    isTablet = isTablet,
-                    onClick = { showPreferredSubtitleDialog = true },
-                )
-                SettingsGroupDivider(isTablet = isTablet)
-                SettingsNavigationRow(
-                    title = stringResource(Res.string.settings_playback_secondary_subtitle_language),
-                    description = languageLabelForCode(settings.secondaryPreferredSubtitleLanguage),
-                    enabled = !settings.externalPlayerEnabled || settings.externalPlayerForwardSubtitles,
-                    isTablet = isTablet,
-                    onClick = { showSecondarySubtitleDialog = true },
-                )
+                if (isIos) {
+                    SettingsSwitchRow(
+                        title = stringResource(Res.string.caption_dialogue_default),
+                        description = stringResource(Res.string.caption_english_defaults_description),
+                        checked = settings.preferredSubtitleLanguage != SubtitleLanguageOption.NONE,
+                        enabled = !settings.externalPlayerEnabled,
+                        isTablet = isTablet,
+                        onCheckedChange = { enabled -> PlayerSettingsRepository.setPreferredSubtitleLanguage(if (enabled) "en" else SubtitleLanguageOption.NONE) },
+                    )
+                } else {
+                    SettingsNavigationRow(
+                        title = stringResource(Res.string.settings_playback_preferred_subtitle_language),
+                        description = when (settings.preferredSubtitleLanguage) {
+                            SubtitleLanguageOption.NONE -> stringResource(Res.string.settings_playback_option_none)
+                            SubtitleLanguageOption.DEVICE -> stringResource(Res.string.settings_playback_option_device_language)
+                            SubtitleLanguageOption.FORCED -> stringResource(Res.string.settings_playback_option_forced)
+                            else -> languageLabelForCode(settings.preferredSubtitleLanguage)
+                        },
+                        enabled = !settings.externalPlayerEnabled || settings.externalPlayerForwardSubtitles,
+                        isTablet = isTablet,
+                        onClick = { showPreferredSubtitleDialog = true },
+                    )
+                    SettingsGroupDivider(isTablet = isTablet)
+                    SettingsNavigationRow(
+                        title = stringResource(Res.string.settings_playback_secondary_subtitle_language),
+                        description = languageLabelForCode(settings.secondaryPreferredSubtitleLanguage),
+                        enabled = !settings.externalPlayerEnabled || settings.externalPlayerForwardSubtitles,
+                        isTablet = isTablet,
+                        onClick = { showSecondarySubtitleDialog = true },
+                    )
+                }
                 if (!isIos) {
                     SettingsGroupDivider(isTablet = isTablet)
                     AutoSyncPlaybackSettingsRows(
@@ -115,14 +127,24 @@ internal fun PlaybackSubtitleSettings(
                     },
                 )
                 SettingsGroupDivider(isTablet = isTablet)
-                SettingsSwitchRow(
-                    title = stringResource(Res.string.settings_playback_auto_show_subtitles_on_rewind),
-                    description = stringResource(Res.string.settings_playback_auto_show_subtitles_on_rewind_description),
-                    checked = settings.autoShowSubtitlesOnRewindEnabled,
-                    enabled = !settings.externalPlayerEnabled,
-                    isTablet = isTablet,
-                    onCheckedChange = PlayerSettingsRepository::setAutoShowSubtitlesOnRewindEnabled,
-                )
+                if (isIos) {
+                    SettingsNavigationRow(
+                        title = stringResource(Res.string.caption_rewind_settings),
+                        description = stringResource(Res.string.caption_rewind_description),
+                        enabled = !settings.externalPlayerEnabled,
+                        isTablet = isTablet,
+                        onClick = { showCaptionRewindDialog = true },
+                    )
+                } else {
+                    SettingsSwitchRow(
+                        title = stringResource(Res.string.settings_playback_auto_show_subtitles_on_rewind),
+                        description = stringResource(Res.string.settings_playback_auto_show_subtitles_on_rewind_description),
+                        checked = settings.autoShowSubtitlesOnRewindEnabled,
+                        enabled = !settings.externalPlayerEnabled,
+                        isTablet = isTablet,
+                        onCheckedChange = PlayerSettingsRepository::setAutoShowSubtitlesOnRewindEnabled,
+                    )
+                }
                 SettingsGroupDivider(isTablet = isTablet)
                 SettingsSwitchRow(
                     title = stringResource(Res.string.settings_playback_auto_show_subtitles_on_mute),
@@ -192,6 +214,25 @@ internal fun PlaybackSubtitleSettings(
                         onCheckedChange = PlayerSettingsRepository::setUseLibmpvAss,
                     )
                 }
+            }
+        }
+    }
+
+    if (showCaptionRewindDialog) {
+        DialogSurface(
+            onDismissRequest = { showCaptionRewindDialog = false },
+            title = stringResource(Res.string.caption_rewind_settings),
+        ) {
+            SettingsSwitchRow(
+                title = stringResource(Res.string.settings_playback_auto_show_subtitles_on_rewind),
+                description = stringResource(Res.string.caption_rewind_description),
+                checked = settings.autoShowSubtitlesOnRewindEnabled,
+                enabled = !settings.externalPlayerEnabled,
+                isTablet = isTablet,
+                onCheckedChange = PlayerSettingsRepository::setAutoShowSubtitlesOnRewindEnabled,
+            )
+            DialogButtons {
+                DialogButton(text = stringResource(Res.string.action_done), onClick = { showCaptionRewindDialog = false })
             }
         }
     }

@@ -67,6 +67,10 @@ private fun PlayerScreenRuntime.deactivateAutoSubtitleIfNeeded() {
 }
 
 internal fun PlayerScreenRuntime.notifyRewindOccurred(fromPositionMs: Long) {
+    if (playerController?.supportsDualSubtitles == true) {
+        playerController?.previewCaptionsAfterRewind()
+        return
+    }
     InAppLogger.debug(AutoSubtitleLogTag, "notifyRewindOccurred: fromPositionMs=$fromPositionMs")
     if (!playerSettingsUiState.autoShowSubtitlesOnRewindEnabled) {
         InAppLogger.debug(AutoSubtitleLogTag, "notifyRewindOccurred: skipped, setting disabled")
@@ -95,6 +99,14 @@ internal fun PlayerScreenRuntime.checkAutoSubtitleRewindWatermark(currentPositio
 }
 
 internal fun PlayerScreenRuntime.notifyVolumeLevelForAutoSubtitle(level: PlayerAudioLevel) {
+    if (playerController?.supportsDualSubtitles == true) {
+        val changed = wasAutoSubtitleVolumeMuted != level.isMuted
+        wasAutoSubtitleVolumeMuted = level.isMuted
+        if (changed || !playerSettingsUiState.autoShowSubtitlesOnMuteEnabled) {
+            playerController?.setTemporaryCaptionMute(playerSettingsUiState.autoShowSubtitlesOnMuteEnabled && level.isMuted)
+        }
+        return
+    }
     if (!playerSettingsUiState.autoShowSubtitlesOnMuteEnabled) {
         wasAutoSubtitleVolumeMuted = level.isMuted
         return

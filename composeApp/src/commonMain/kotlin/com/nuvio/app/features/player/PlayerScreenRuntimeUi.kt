@@ -594,6 +594,12 @@ private fun PlayerScreenRuntime.RenderPlayerControls(
                     controlsActivityTick += 1
                 }
             } else null,
+            onSubtitleTracksClick = if (!isLiveTvPlayback && playerController?.supportsDualSubtitles == true) {
+                {
+                    controlsActivityTick += 1
+                    playerController?.showDualSubtitleSettings()
+                }
+            } else null,
             onSubtitleClick = if (!isLiveTvPlayback) {
                 {
                     refreshTracks()

@@ -92,6 +92,8 @@ actual fun PlatformPlayerSurface(
 
     val controller = remember(bridge) {
         object : PlayerEngineController, PlayerSystemControlSource {
+            override val supportsDualSubtitles = true
+            override fun showDualSubtitleSettings() { bridge.showDualSubtitleSettings() }
             private var lastAppliedVolume: Float? = null
             private var lastLoggedAudioTracks: String? = null
 
@@ -530,12 +532,6 @@ actual fun PlatformPlayerSurface(
             interactive = false,
         )
         StyledSubtitleOverlay(subtitleText, subtitleStyle)
-        androidx.compose.material3.TextButton(
-            onClick = { bridge.showDualSubtitleSettings() },
-            modifier = Modifier.align(Alignment.TopEnd),
-        ) {
-            androidx.compose.material3.Text("Subtitle tracks", color = Color.White)
-        }
         
         if (useNativeController) {
             var isPlayingLocal by remember { mutableStateOf(playWhenReady) }

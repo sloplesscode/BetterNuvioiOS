@@ -39,6 +39,9 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
       GRADLE_OPTS: -Dfile.encoding=UTF-8
+      # Public anonymous client configuration used by https://nuvio.tv/link.
+      NUVIO_SUPABASE_URL: https://api.nuvio.tv
+      NUVIO_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzgxNTIxMzQ2LCJleHAiOjE5MzkyMDEzNDZ9.tmQaj682pwzehpqlgCDMnySOqiUvpgRbrE43T4VJpDI
       IOS_CONFIGURATION: ${{ inputs.configuration || 'Debug' }}
       NUVIO_IOS_PHASE_PROFILE: ${{ inputs.disable_phases }}
       KOTLIN_DAEMON_JVMARGS: -Xmx1024M

@@ -161,6 +161,7 @@ internal fun PlayerControlActions(
     metrics: PlayerLayoutMetrics,
     resizeMode: PlayerResizeMode,
     onSubtitleClick: () -> Unit,
+    onSubtitleTracksClick: (() -> Unit)? = null,
     onAudioClick: () -> Unit,
     onSourcesClick: (() -> Unit)?,
     onEpisodesClick: (() -> Unit)?,
@@ -293,8 +294,15 @@ internal fun PlayerControlActions(
     }
     val playerSettings by PlayerSettingsRepository.uiState.collectAsState()
     val toolbarLayout = playerSettings.toolbarLayout
-    val primaryActions = toolbarLayout.visibleButtons.mapNotNull(availableActions::get)
-    val secondaryActions = toolbarLayout.hiddenButtons.mapNotNull(availableActions::get)
+    val tracksAction = onSubtitleTracksClick?.let {
+        PlayerControlAction(stringResource(Res.string.player_subtitle_tracks), it,
+            painter = appIconPainter(AppIconResource.PlayerSubtitles))
+    }
+    fun actionsFor(buttons: List<PlayerToolbarButton>): List<PlayerControlAction> = buttons.flatMap { button ->
+        listOfNotNull(availableActions[button], tracksAction.takeIf { button == PlayerToolbarButton.SUBTITLES })
+    }
+    val primaryActions = actionsFor(toolbarLayout.visibleButtons)
+    val secondaryActions = actionsFor(toolbarLayout.hiddenButtons)
     val hasOverflow = secondaryActions.isNotEmpty()
     var expanded by remember(hasOverflow) { mutableStateOf(false) }
     val scrollState = rememberScrollState()
@@ -408,6 +416,7 @@ internal fun playerControlActions(
     playbackSnapshot: PlayerPlaybackSnapshot,
     resizeMode: PlayerResizeMode,
     onSubtitleClick: () -> Unit,
+    onSubtitleTracksClick: (() -> Unit)? = null,
     onAudioClick: () -> Unit,
     onSourcesClick: (() -> Unit)?,
     onEpisodesClick: (() -> Unit)?,
@@ -431,6 +440,10 @@ internal fun playerControlActions(
             stringResource(Res.string.compose_player_subtitles), onSubtitleClick,
             painter = appIconPainter(AppIconResource.PlayerSubtitles),
         ),
+        onSubtitleTracksClick?.let {
+            PlayerControlAction(stringResource(Res.string.player_subtitle_tracks), it,
+                painter = appIconPainter(AppIconResource.PlayerSubtitles))
+        },
         PlayerControlAction(
             stringResource(Res.string.compose_player_audio), onAudioClick,
             painter = appIconPainter(AppIconResource.PlayerAudioFilled),

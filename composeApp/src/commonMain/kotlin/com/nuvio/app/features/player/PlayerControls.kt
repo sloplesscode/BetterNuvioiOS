@@ -152,6 +152,7 @@ internal fun PlayerControlsShell(
     nightModeEnabled: Boolean = false,
     onNightModeClick: (() -> Unit)? = null,
     onSubtitleClick: (() -> Unit)? = null,
+    onSubtitleTracksClick: (() -> Unit)? = null,
     onAudioClick: (() -> Unit)? = null,
     onVideoSettingsClick: (() -> Unit)? = null,
     onCastClick: (() -> Unit)? = null,
@@ -212,6 +213,7 @@ internal fun PlayerControlsShell(
             onScrubChange = onScrubChange,
             onScrubFinished = onScrubFinished,
             onSubtitleClick = onSubtitleClick ?: {},
+            onSubtitleTracksClick = onSubtitleTracksClick,
             onAudioClick = onAudioClick ?: {},
             onSourcesClick = onSourcesClick,
             onEpisodesClick = onEpisodesClick,
@@ -399,6 +401,7 @@ internal fun PlayerControlsShell(
                     nightModeEnabled = nightModeEnabled,
                     onNightModeClick = onNightModeClick,
                     onSubtitleClick = onSubtitleClick,
+                    onSubtitleTracksClick = onSubtitleTracksClick,
                     onAudioClick = onAudioClick,
                     onSourcesClick = onSourcesClick,
                     onEpisodesClick = onEpisodesClick,
@@ -487,6 +490,7 @@ internal fun PlayerControlsShell(
                         metrics = metrics,
                         resizeMode = resizeMode,
                         onSubtitleClick = { onSubtitleClick?.invoke() },
+                        onSubtitleTracksClick = onSubtitleTracksClick,
                         onAudioClick = { onAudioClick?.invoke() },
                         onSourcesClick = onSourcesClick,
                         onEpisodesClick = onEpisodesClick,
@@ -974,6 +978,7 @@ private fun ProgressControls(
     nightModeEnabled: Boolean = false,
     onNightModeClick: (() -> Unit)? = null,
     onSubtitleClick: (() -> Unit)? = null,
+    onSubtitleTracksClick: (() -> Unit)? = null,
     onAudioClick: (() -> Unit)? = null,
     onSourcesClick: (() -> Unit)? = null,
     onEpisodesClick: (() -> Unit)? = null,
@@ -1104,6 +1109,13 @@ private fun ProgressControls(
                                                 painter = subtitlesPainter,
                                                 onClick = onSubtitleClick,
                                             )
+                                            onSubtitleTracksClick?.let { openTracks ->
+                                                PlayerActionPillButton(
+                                                    label = stringResource(Res.string.player_subtitle_tracks),
+                                                    painter = subtitlesPainter,
+                                                    onClick = openTracks,
+                                                )
+                                            }
                                         }
                                     }
                                     LegacyBottomButton.AUDIO -> {

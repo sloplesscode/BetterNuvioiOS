@@ -5,6 +5,7 @@ import Metal
 import Libmpv
 import Libavfilter
 import ComposeApp
+import SwiftUI
 
 // MARK: - Player Bridge Implementation (Kotlin protocol conformance)
 
@@ -198,6 +199,7 @@ final class MPVPlayerBridgeImpl: NSObject, NuvioPlayerBridge {
 
     func selectAudioTrack(trackId: Int32) { playerVC?.selectAudio(Int(trackId)) }
     func selectSubtitleTrack(trackId: Int32) { playerVC?.selectSubtitle(Int(trackId)) }
+    func showDualSubtitleSettings() { playerVC?.showDualSubtitleSettings() }
     func setSubtitleUrl(url: String) { playerVC?.addSubtitleUrl(url) }
     func clearExternalSubtitle() { playerVC?.removeExternalSubtitles() }
     func clearExternalSubtitleAndSelect(trackId: Int32) { playerVC?.removeExternalSubtitlesAndSelect(Int(trackId)) }
@@ -477,6 +479,9 @@ final class MPVPlayerViewController: UIViewController {
 
     var audioTracks: [TrackInfo] = []
     var subtitleTracks: [TrackInfo] = []
+    private var dualSubtitleStyles = [DualSubtitleStyle(), DualSubtitleStyle()]
+    private var dualSubtitleLabels = [UILabel(), UILabel()]
+    private var secondarySubtitleTrackId = -1
     var isPlayerLoading: Bool = true
     var isPlayerPlaying: Bool = false
     var isPlayerEnded: Bool = false
@@ -790,6 +795,7 @@ final class MPVPlayerViewController: UIViewController {
         mpv_observe_property(mpv, 0, "track-list/count", MPV_FORMAT_INT64)
         mpv_observe_property(mpv, 0, "current-tracks/sub/id", MPV_FORMAT_INT64)
         mpv_observe_property(mpv, 0, "sub-text", MPV_FORMAT_STRING)
+        mpv_observe_property(mpv, 0, "secondary-sub-text", MPV_FORMAT_STRING)
 
         mpv_set_wakeup_callback(mpv, { ctx in
             let vc = unsafeBitCast(ctx, to: MPVPlayerViewController.self)
@@ -1461,6 +1467,9 @@ final class MPVPlayerViewController: UIViewController {
         if let muted = lastMuted { setMuted(muted) }
         if let audioTrack = lastSelectedAudioTrackId { selectAudio(audioTrack) }
         if let subtitleTrack = lastSelectedSubtitleTrackId { selectSubtitle(subtitleTrack) }
+        setStringProperty("secondary-sub-ass-override", "no")
+        setStringProperty("secondary-sid", secondarySubtitleTrackId < 0 ? "no" : String(secondarySubtitleTrackId))
+        setDoubleProperty("secondary-sub-delay", dualSubtitleStyles[1].delay)
     }
 
     func retryPlayback() {
@@ -1743,7 +1752,7 @@ final class MPVPlayerViewController: UIViewController {
         for i in stride(from: count - 1, through: 0, by: -1) {
             let type = getString("track-list/\(i)/type") ?? ""
             let external = getFlag("track-list/\(i)/external")
-            if type == "sub" && external {
+            if type == "sub" && external && getInt("track-list/\(i)/id") != secondarySubtitleTrackId {
                 let id = getInt("track-list/\(i)/id")
                 command("sub-remove", args: ["\(id)"], checkForErrors: false)
             }
@@ -1807,10 +1816,11 @@ final class MPVPlayerViewController: UIViewController {
 
     private func updateStyledSubtitle() {
         guard mpv != nil else { return }
+        updateDualSubtitleLabels()
         let codec = getString("current-tracks/sub/codec") ?? ""
-        let styled = usesStyledSubtitles && SubtitleRendering.shared.supportsTextOverlay(codec: codec)
+        let styled = !dualSubtitleStyles[0].custom && usesStyledSubtitles && SubtitleRendering.shared.supportsTextOverlay(codec: codec)
         if styled != styledSubtitleVisible {
-            setStringProperty("sub-visibility", styled ? "no" : "yes")
+            setStringProperty("sub-visibility", styled || dualSubtitleStyles[0].custom ? "no" : "yes")
             styledSubtitleVisible = styled
         }
         let cueText = getString("sub-text") ?? ""
@@ -2495,7 +2505,7 @@ final class MPVPlayerViewController: UIViewController {
                 case MPV_EVENT_PROPERTY_CHANGE:
                     let property = eventPtr.pointee.data?.assumingMemoryBound(to: mpv_event_property.self)
                     let name = property?.pointee.name.map { String(cString: $0) }
-                    if name == "sub-text" {
+                    if name == "sub-text" || name == "secondary-sub-text" {
                         DispatchQueue.main.async { self.updateStyledSubtitle() }
                     } else {
                         DispatchQueue.main.async { self.updateState() }
@@ -2833,6 +2843,137 @@ final class MPVPlayerViewController: UIViewController {
 }
 
 // MARK: - Bridge Creator (implements Kotlin protocol)
+
+private struct DualSubtitleStyle {
+    var custom = false
+    var size = 38.0
+    var position = 100.0
+    var delay = 0.0
+    var outline = 2.0
+    var bold = false
+    var color = Color.white
+    var background = Color.clear
+    var outlineColor = Color.black
+}
+
+private struct DualSubtitleSettingsView: View {
+    let tracks: [TrackInfo]
+    @State var selections: [Int]
+    @State var styles: [DualSubtitleStyle]
+    let apply: (Int, Int, DualSubtitleStyle) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                ForEach(0..<2, id: \.self) { slot in
+                    Section(slot == 0 ? "Track 1 · Dialogue" : "Track 2 · Signs") {
+                        Picker("Subtitle track", selection: $selections[slot]) {
+                            Text("Off").tag(-1)
+                            ForEach(tracks, id: \.id) { track in
+                                Text(track.title.isEmpty ? "\(track.lang) · Track \(track.id)" : track.title).tag(track.id)
+                            }
+                        }
+                        Toggle("Customize text appearance", isOn: $styles[slot].custom)
+                        Text("Leave customization off to preserve original subtitle styling and sign positions. Both tracks render independently and may overlap. Image subtitles retain their original appearance.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        if styles[slot].custom {
+                            ColorPicker("Text color", selection: $styles[slot].color)
+                            ColorPicker("Background", selection: $styles[slot].background)
+                            ColorPicker("Outline color", selection: $styles[slot].outlineColor)
+                            Toggle("Bold", isOn: $styles[slot].bold)
+                            Text("Font size: \(Int(styles[slot].size))")
+                            Slider(value: $styles[slot].size, in: 12...80, step: 1)
+                            Text("Vertical position: \(Int(styles[slot].position))%")
+                            Slider(value: $styles[slot].position, in: 0...100, step: 1)
+                            Text("Outline: \(Int(styles[slot].outline))")
+                            Slider(value: $styles[slot].outline, in: 0...8, step: 1)
+                        }
+                        Text("Delay: \(styles[slot].delay, specifier: "%.1f") seconds")
+                        Slider(value: $styles[slot].delay, in: -60...60, step: 0.1)
+                        Button("Reset appearance") { styles[slot] = DualSubtitleStyle() }
+                    }
+                }
+            }
+            .navigationTitle("Subtitle tracks")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Apply") {
+                        for slot in 0...1 { apply(slot, selections[slot], styles[slot]) }
+                        dismiss()
+                    }.disabled(selections[0] >= 0 && selections[0] == selections[1])
+                }
+            }
+        }
+    }
+}
+
+extension MPVPlayerViewController {
+    func showDualSubtitleSettings() {
+        guard mpv != nil else { return }
+        refreshTracks()
+        let settings = DualSubtitleSettingsView(
+            tracks: subtitleTracks,
+            selections: [Int(getString("sid") ?? "") ?? -1, Int(getString("secondary-sid") ?? "") ?? -1],
+            styles: dualSubtitleStyles
+        ) { [weak self] slot, track, style in
+            guard let self else { return }
+            self.dualSubtitleStyles[slot] = style
+            if slot == 0 {
+                self.selectSubtitle(track)
+                self.lastSubtitleDelayMs = Int(style.delay * 1000)
+            } else {
+                self.secondarySubtitleTrackId = track
+                self.setStringProperty("secondary-sub-ass-override", "no")
+                self.setStringProperty("secondary-sid", track < 0 ? "no" : String(track))
+            }
+            self.setDoubleProperty(slot == 0 ? "sub-delay" : "secondary-sub-delay", style.delay)
+            self.updateStyledSubtitle()
+        }
+        var presenter: UIViewController = self
+        while let parent = presenter.parent { presenter = parent }
+        guard presenter.presentedViewController == nil else { return }
+        presenter.present(UIHostingController(rootView: settings), animated: true)
+    }
+
+    private func updateDualSubtitleLabels() {
+        for slot in 0...1 {
+            let style = dualSubtitleStyles[slot]
+            let label = dualSubtitleLabels[slot]
+            let prefix = slot == 0 ? "" : "secondary-"
+            let selectedID = Int(getString(slot == 0 ? "sid" : "secondary-sid") ?? "") ?? -1
+            let bitmap = (0..<max(0, getInt("track-list/count"))).contains { index in
+                getInt("track-list/\(index)/id") == selectedID
+                    && getString("track-list/\(index)/type") == "sub"
+                    && getFlag("track-list/\(index)/image")
+            }
+            let custom = style.custom && !bitmap
+            if slot == 1 || custom || !styledSubtitleVisible {
+                setStringProperty(prefix + "sub-visibility", custom ? "no" : "yes")
+            }
+            label.isHidden = !custom
+            guard custom else { continue }
+            if label.superview == nil {
+                label.numberOfLines = 0
+                label.textAlignment = .center
+                label.isUserInteractionEnabled = false
+                view.addSubview(label)
+            }
+            let size = style.size * view.bounds.height / 720
+            label.attributedText = NSAttributedString(string: selectedID < 0 ? "" : getString(prefix + "sub-text") ?? "", attributes: [
+                .font: UIFont.systemFont(ofSize: max(1, size), weight: style.bold ? .bold : .regular),
+                .foregroundColor: UIColor(style.color),
+                .strokeColor: UIColor(style.outlineColor),
+                .strokeWidth: -style.outline * 2,
+            ])
+            label.backgroundColor = UIColor(style.background)
+            let width = max(1, view.bounds.width - 32)
+            let height = label.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
+            label.frame = CGRect(x: 16, y: max(0, view.bounds.height - height - 16) * style.position / 100, width: width, height: height)
+        }
+    }
+}
 
 final class MPVPlayerBridgeCreator: NSObject, NuvioPlayerBridgeCreator {
     func createBridge() -> any NuvioPlayerBridge {

@@ -530,6 +530,12 @@ actual fun PlatformPlayerSurface(
             interactive = false,
         )
         StyledSubtitleOverlay(subtitleText, subtitleStyle)
+        androidx.compose.material3.TextButton(
+            onClick = { bridge.showDualSubtitleSettings() },
+            modifier = Modifier.align(Alignment.TopEnd),
+        ) {
+            androidx.compose.material3.Text("Subtitle tracks", color = Color.White)
+        }
         
         if (useNativeController) {
             var isPlayingLocal by remember { mutableStateOf(playWhenReady) }
